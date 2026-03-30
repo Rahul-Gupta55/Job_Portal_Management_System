@@ -14,5 +14,6 @@ public class JobAppliedEvent {
     private Long jobId;
     private Long candidateId;
     private Long recruiterId;
+    private String jobTitle;
     private LocalDateTime appliedAt;
 }

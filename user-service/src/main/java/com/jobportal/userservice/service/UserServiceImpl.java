@@ -1,19 +1,25 @@
 package com.jobportal.userservice.service;
 
+import com.jobportal.commonsecurity.security.JwtUserPrincipal;
+import com.jobportal.commonsecurity.security.JwtUtil;
+import com.jobportal.userservice.client.NotificationServiceClient;
 import com.jobportal.userservice.dto.*;
+import com.jobportal.userservice.entity.PasswordResetOtp;
 import com.jobportal.userservice.entity.Role;
 import com.jobportal.userservice.entity.User;
 import com.jobportal.userservice.entity.UserProfile;
 import com.jobportal.userservice.exception.BadRequestException;
 import com.jobportal.userservice.exception.DuplicateEmailException;
 import com.jobportal.userservice.exception.ResourceNotFoundException;
+import com.jobportal.userservice.exception.ServiceUnavailableException;
 import com.jobportal.userservice.exception.UnauthorizedActionException;
+import com.jobportal.userservice.repository.PasswordResetOtpRepository;
 import com.jobportal.userservice.repository.UserProfileRepository;
 import com.jobportal.userservice.repository.UserRepository;
-import com.jobportal.commonsecurity.security.JwtUserPrincipal;
-import com.jobportal.commonsecurity.security.JwtUtil;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -21,6 +27,9 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @RequiredArgsConstructor
@@ -30,9 +39,17 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
+    private final PasswordResetOtpRepository passwordResetOtpRepository;
+    private final NotificationServiceClient notificationServiceClient;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
+
+    @Value("${app.password-reset.otp-expiry-minutes:10}")
+    private long otpExpiryMinutes;
+
+    @Value("${app.internal.api-key:jobportal-internal-key}")
+    private String internalApiKey;
 
     @Override
     public UserResponse register(RegisterRequest request) {
@@ -106,6 +123,92 @@ public class UserServiceImpl implements UserService {
             log.error("Token refresh failed.", ex);
             throw new BadRequestException(ex.getMessage() == null ? "Invalid refresh token" : ex.getMessage());
         }
+    }
+
+    @Override
+    public void requestPasswordResetOtp(ForgotPasswordRequest request) {
+        String email = request.getEmail().toLowerCase();
+        User user = userRepository.findByEmail(email).orElse(null);
+
+        if (user == null) {
+            log.warn("Password reset OTP requested for non-existent email={}", email);
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        passwordResetOtpRepository.markAllActiveAsUsed(email, now);
+
+        PasswordResetOtp otp = PasswordResetOtp.builder()
+                .userId(user.getId())
+                .email(email)
+                .otpCode(generateOtp())
+                .expiresAt(now.plusMinutes(otpExpiryMinutes))
+                .used(false)
+                .build();
+        PasswordResetOtp savedOtp = passwordResetOtpRepository.save(otp);
+
+        String emailBody = buildOtpEmailBody(user.getName(), savedOtp.getOtpCode());
+
+        try {
+            notificationServiceClient.sendEmail(internalApiKey, InternalEmailRequest.builder()
+                    .recipientId(user.getId())
+                    .to(email)
+                    .subject("Your Job Portal password reset code")
+                    .body(emailBody)
+                    .eventType("password.reset.otp")
+                    .referenceId(savedOtp.getId())
+                    .build());
+            log.info("Password reset OTP generated and email requested. userId={}, otpId={}", user.getId(), savedOtp.getId());
+        } catch (FeignException ex) {
+            savedOtp.setUsed(true);
+            savedOtp.setUsedAt(LocalDateTime.now());
+            passwordResetOtpRepository.save(savedOtp);
+            log.error("Password reset OTP email request failed. userId={}, otpId={}", user.getId(), savedOtp.getId(), ex);
+            throw new ServiceUnavailableException("Unable to send OTP email right now. Please try again.");
+        }
+    }
+
+    @Override
+    public void resetPasswordWithOtp(ResetPasswordWithOtpRequest request) {
+        String email = request.getEmail().toLowerCase();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+
+        PasswordResetOtp otp = passwordResetOtpRepository
+                .findTopByEmailAndOtpCodeAndUsedFalseOrderByCreatedAtDesc(email, request.getOtp())
+                .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+
+        LocalDateTime now = LocalDateTime.now();
+        if (otp.getExpiresAt().isBefore(now)) {
+            otp.setUsed(true);
+            otp.setUsedAt(now);
+            passwordResetOtpRepository.save(otp);
+            log.warn("Expired OTP used for password reset attempt. userId={}, otpId={}", user.getId(), otp.getId());
+            throw new BadRequestException("Invalid or expired OTP");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        otp.setUsed(true);
+        otp.setUsedAt(now);
+        passwordResetOtpRepository.save(otp);
+        passwordResetOtpRepository.markAllActiveAsUsed(email, now);
+
+        log.info("Password reset completed using OTP. userId={}, otpId={}", user.getId(), otp.getId());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public InternalUserContactResponse getInternalUserContact(Long id) {
+        User user = findUser(id);
+        return InternalUserContactResponse.builder()
+                .id(user.getId())
+                .name(user.getName())
+                .email(user.getEmail())
+                .role(user.getRole().name())
+                .active(user.isActive())
+                .build();
     }
 
     @Override
@@ -255,4 +358,19 @@ public class UserServiceImpl implements UserService {
                 .updatedAt(profile.getUpdatedAt())
                 .build();
     }
+
+    private String generateOtp() {
+        return String.valueOf(ThreadLocalRandom.current().nextInt(100000, 1000000));
+    }
+
+    private String buildOtpEmailBody(String name, String otp) {
+        String safeName = (name == null || name.isBlank()) ? "User" : name;
+        return "Hello " + safeName + ",\n\n"
+                + "We received a request to reset the password for your Job Portal account.\n\n"
+                + "One-Time Password (OTP): " + otp + "\n"
+                + "Validity: " + otpExpiryMinutes + " minutes\n\n"
+                + "Please use this OTP to complete your password reset. For your security, do not share it with anyone.\n\n"
+                + "If you did not request a password reset, you can safely ignore this email.\n";
+    }
+
 }

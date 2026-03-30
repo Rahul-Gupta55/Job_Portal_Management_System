@@ -43,6 +43,20 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.of("Token refreshed successfully", userService.refreshToken(request)));
     }
 
+    @PostMapping("/forgot-password/request-otp")
+    @Operation(summary = "Send OTP to email for password reset")
+    public ResponseEntity<ApiResponse<Void>> requestForgotPasswordOtp(@Valid @RequestBody ForgotPasswordRequest request) {
+        userService.requestPasswordResetOtp(request);
+        return ResponseEntity.ok(ApiResponse.of("If the email is registered, an OTP has been sent", null));
+    }
+
+    @PostMapping("/forgot-password/reset")
+    @Operation(summary = "Reset password using OTP")
+    public ResponseEntity<ApiResponse<Void>> resetPasswordWithOtp(@Valid @RequestBody ResetPasswordWithOtpRequest request) {
+        userService.resetPasswordWithOtp(request);
+        return ResponseEntity.ok(ApiResponse.of("Password reset successful", null));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get user basic details")
     public ResponseEntity<ApiResponse<UserResponse>> getUser(@PathVariable Long id,

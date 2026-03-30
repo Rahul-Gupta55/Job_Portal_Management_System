@@ -28,8 +28,11 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
                 .authorizeHttpRequests(auth -> auth
+                        // 1. Public Endpoints (No Auth Required)
                         .requestMatchers(
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
@@ -39,20 +42,30 @@ public class SecurityConfig {
                                 "/api/users/register",
                                 "/api/users/login",
                                 "/api/users/refresh-token",
+                                "/api/users/forgot-password/**",
                                 "/api/search/**"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/jobs/recruiter/**").authenticated()
+
+                        // 2. Job Management (Specific Roles)
+                        // Note: GET /api/jobs/recruiter/** must come BEFORE GET /api/jobs/**
+                        .requestMatchers(HttpMethod.GET, "/api/jobs/recruiter/**").hasAnyRole("RECRUITER", "ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/jobs/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/jobs").hasAnyRole("RECRUITER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/jobs/**").hasAnyRole("RECRUITER", "ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/jobs/**").hasAnyRole("RECRUITER", "ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/jobs/**").hasAnyRole("RECRUITER", "ADMIN")
+
+                        // 3. Applications
                         .requestMatchers(HttpMethod.POST, "/api/applications").hasAnyRole("JOB_SEEKER", "ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/applications/job/**").hasAnyRole("RECRUITER", "ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/applications/*/status").hasAnyRole("RECRUITER", "ADMIN")
+
+                        // 4. General Authenticated (Resumes, Notifications, User Profile, etc.)
                         .requestMatchers("/api/applications/**").authenticated()
                         .requestMatchers("/api/resumes/**").authenticated()
                         .requestMatchers("/api/notifications/**").authenticated()
                         .requestMatchers("/api/users/**").authenticated()
+
+                        // 5. Catch-all for any other endpoint
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

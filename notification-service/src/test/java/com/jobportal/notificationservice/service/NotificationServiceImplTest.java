@@ -1,6 +1,10 @@
 package com.jobportal.notificationservice.service;
 
+import com.jobportal.notificationservice.client.UserServiceClient;
+import com.jobportal.notificationservice.dto.ApiResponse;
+import com.jobportal.notificationservice.dto.InternalEmailRequest;
 import com.jobportal.notificationservice.dto.NotificationResponse;
+import com.jobportal.notificationservice.dto.UserContactResponse;
 import com.jobportal.notificationservice.entity.Notification;
 import com.jobportal.notificationservice.entity.NotificationStatus;
 import com.jobportal.notificationservice.entity.NotificationType;
@@ -9,12 +13,14 @@ import com.jobportal.notificationservice.event.JobAppliedEvent;
 import com.jobportal.notificationservice.event.JobCreatedEvent;
 import com.jobportal.notificationservice.exception.UnauthorizedActionException;
 import com.jobportal.notificationservice.repository.NotificationRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +28,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,9 +36,18 @@ class NotificationServiceImplTest {
 
     @Mock
     private NotificationRepository notificationRepository;
+    @Mock
+    private EmailNotificationService emailNotificationService;
+    @Mock
+    private UserServiceClient userServiceClient;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(notificationService, "internalApiKey", "jobportal-internal-key");
+    }
 
     @Test
     void getByUserReturnsOnlyOwnersNotifications() {
@@ -127,51 +143,92 @@ class NotificationServiceImplTest {
     }
 
     @Test
-    void handleJobCreatedCreatesRecruiterNotification() {
+    void handleJobCreatedSendsRealEmailToRecruiter() {
         JobCreatedEvent event = JobCreatedEvent.builder()
                 .jobId(10L)
                 .title("Java Developer")
                 .company("Acme")
                 .recruiterId(7L)
                 .build();
+        when(userServiceClient.getInternalUserContact("jobportal-internal-key", 7L))
+                .thenReturn(ApiResponse.of("ok", UserContactResponse.builder()
+                        .id(7L)
+                        .name("Recruiter")
+                        .email("recruiter@example.com")
+                        .role("RECRUITER")
+                        .active(true)
+                        .build()));
 
         notificationService.handleJobCreated(event);
 
-        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository).save(captor.capture());
+        ArgumentCaptor<InternalEmailRequest> captor = ArgumentCaptor.forClass(InternalEmailRequest.class);
+        verify(emailNotificationService).sendEmail(captor.capture());
         assertThat(captor.getValue().getRecipientId()).isEqualTo(7L);
-        assertThat(captor.getValue().getSubject()).contains("Job created");
+        assertThat(captor.getValue().getTo()).isEqualTo("recruiter@example.com");
+        assertThat(captor.getValue().getSubject()).isEqualTo("Job posting published successfully");
+        assertThat(captor.getValue().getBody()).contains("Hello Recruiter");
+        assertThat(captor.getValue().getBody()).contains("Position: Java Developer");
+        verify(notificationRepository, never()).save(any(Notification.class));
     }
 
     @Test
-    void handleJobAppliedCreatesTwoNotifications() {
+    void handleJobAppliedSendsTwoEmails() {
         JobAppliedEvent event = JobAppliedEvent.builder()
                 .applicationId(9L)
                 .jobId(10L)
                 .candidateId(5L)
                 .recruiterId(7L)
+                .jobTitle("Java Developer")
                 .build();
+        when(userServiceClient.getInternalUserContact(eq("jobportal-internal-key"), any(Long.class)))
+                .thenAnswer(invocation -> {
+                    Long id = invocation.getArgument(1);
+                    return ApiResponse.of("ok", UserContactResponse.builder()
+                            .id(id)
+                            .name("User" + id)
+                            .email("user" + id + "@example.com")
+                            .role(id.equals(7L) ? "RECRUITER" : "JOB_SEEKER")
+                            .active(true)
+                            .build());
+                });
 
         notificationService.handleJobApplied(event);
 
-        verify(notificationRepository, times(2)).save(any(Notification.class));
+        ArgumentCaptor<InternalEmailRequest> captor = ArgumentCaptor.forClass(InternalEmailRequest.class);
+        verify(emailNotificationService, times(2)).sendEmail(captor.capture());
+        assertThat(captor.getAllValues()).extracting(InternalEmailRequest::getSubject)
+                .containsExactlyInAnyOrder("Application submitted successfully", "New application received");
+        assertThat(captor.getAllValues().stream()
+                .map(InternalEmailRequest::getBody)
+                .anyMatch(body -> body.contains("Position: Java Developer")))
+                .isTrue();
     }
 
     @Test
-    void handleStatusChangedCreatesCandidateNotification() {
+    void handleStatusChangedCreatesFailedNotificationWhenRecipientIsInactive() {
         AppStatusChangedEvent event = AppStatusChangedEvent.builder()
                 .applicationId(9L)
                 .jobId(10L)
                 .candidateId(5L)
                 .recruiterId(7L)
+                .jobTitle("Java Developer")
                 .newStatus("SHORTLISTED")
                 .build();
+        when(userServiceClient.getInternalUserContact("jobportal-internal-key", 5L))
+                .thenReturn(ApiResponse.of("ok", UserContactResponse.builder()
+                        .id(5L)
+                        .name("Candidate")
+                        .email("candidate@example.com")
+                        .role("JOB_SEEKER")
+                        .active(false)
+                        .build()));
 
         notificationService.handleStatusChanged(event);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(notificationRepository).save(captor.capture());
-        assertThat(captor.getValue().getBody()).contains("SHORTLISTED");
+        assertThat(captor.getValue().getStatus()).isEqualTo(NotificationStatus.FAILED);
         assertThat(captor.getValue().getRecipientId()).isEqualTo(5L);
+        verify(emailNotificationService, never()).sendEmail(any());
     }
 }

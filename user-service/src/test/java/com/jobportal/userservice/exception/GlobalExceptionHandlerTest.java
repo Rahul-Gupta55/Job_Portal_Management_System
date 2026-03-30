@@ -1,6 +1,7 @@
 package com.jobportal.userservice.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -23,6 +24,7 @@ class GlobalExceptionHandlerTest {
         var response = handler.handleNotFound(new ResourceNotFoundException("User", 9L), request());
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
+        Assertions.assertNotNull(response.getBody());
         assertThat(response.getBody().getMessage()).contains("User not found");
     }
 
@@ -47,7 +49,16 @@ class GlobalExceptionHandlerTest {
         var response = handler.handleBadRequest(new BadCredentialsException("bad credentials"), request());
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
+        Assertions.assertNotNull(response.getBody());
         assertThat(response.getBody().getMessage()).isEqualTo("bad credentials");
+    }
+
+    @Test
+    void handleServiceUnavailableReturns503() {
+        var response = handler.handleServiceUnavailable(new ServiceUnavailableException("mail down"), request());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        assertThat(response.getBody().getMessage()).isEqualTo("mail down");
     }
 
     @Test
@@ -86,7 +97,7 @@ class GlobalExceptionHandlerTest {
     static class ValidationTarget {
         @SuppressWarnings("unused")
         void handle(String value) {
-            // Intentionally empty: this method exists only to provide a MethodParameter for validation tests.
+            // no-op
         }
     }
 }

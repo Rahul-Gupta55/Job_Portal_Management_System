@@ -83,6 +83,7 @@ public class ApplicationServiceImpl implements ApplicationService {
                 .jobId(saved.getJobId())
                 .candidateId(saved.getCandidateId())
                 .recruiterId(job.getRecruiterId())
+                .jobTitle(job.getTitle())
                 .appliedAt(saved.getAppliedAt())
                 .build());
 
@@ -161,6 +162,7 @@ public class ApplicationServiceImpl implements ApplicationService {
                 .jobId(saved.getJobId())
                 .candidateId(saved.getCandidateId())
                 .recruiterId(job.getRecruiterId())
+                .jobTitle(job.getTitle())
                 .newStatus(saved.getStatus().name())
                 .notes(request.getNotes())
                 .changedAt(LocalDateTime.now())

@@ -12,5 +12,7 @@ import java.time.LocalDateTime;
 public class JobClosedEvent {
     private Long jobId;
     private Long recruiterId;
+    private String title;
+    private String company;
     private LocalDateTime closedAt;
 }

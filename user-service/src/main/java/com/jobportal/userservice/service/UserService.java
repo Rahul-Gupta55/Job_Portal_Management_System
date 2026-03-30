@@ -13,7 +13,10 @@ public interface UserService {
     UserResponse getUserById(Long id, JwtUserPrincipal principal);
     UserResponse updateUser(Long id, UpdateUserRequest request, JwtUserPrincipal principal);
     void changePassword(Long id, ChangePasswordRequest request, JwtUserPrincipal principal);
+    void requestPasswordResetOtp(ForgotPasswordRequest request);
+    void resetPasswordWithOtp(ResetPasswordWithOtpRequest request);
     void deactivateUser(Long id);
+    InternalUserContactResponse getInternalUserContact(Long id);
     Page<UserResponse> listUsers(Role role, Pageable pageable);
     UserProfileResponse getProfile(Long userId, JwtUserPrincipal principal);
     UserProfileResponse upsertProfile(Long userId, UserProfileRequest request, JwtUserPrincipal principal);

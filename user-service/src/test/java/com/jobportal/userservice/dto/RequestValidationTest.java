@@ -60,4 +60,26 @@ class RequestValidationTest {
                 .extracting(violation -> violation.getPropertyPath().toString())
                 .contains("password");
     }
+
+    @Test
+    void forgotPasswordRequestRejectsBlankEmail() {
+        ForgotPasswordRequest request = ForgotPasswordRequest.builder().email("").build();
+
+        assertThat(validator.validate(request))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("email");
+    }
+
+    @Test
+    void resetPasswordWithOtpRequestRejectsOtpThatIsNotSixDigits() {
+        ResetPasswordWithOtpRequest request = ResetPasswordWithOtpRequest.builder()
+                .email("alice@example.com")
+                .otp("12AB")
+                .newPassword("Password1")
+                .build();
+
+        assertThat(validator.validate(request))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("otp");
+    }
 }

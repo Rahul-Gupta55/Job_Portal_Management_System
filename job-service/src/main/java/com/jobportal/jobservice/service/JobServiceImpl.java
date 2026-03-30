@@ -137,6 +137,8 @@ public class JobServiceImpl implements JobService {
         jobEventPublisher.publishJobClosed(JobClosedEvent.builder()
                 .jobId(saved.getId())
                 .recruiterId(saved.getRecruiterId())
+                .title(saved.getTitle())
+                .company(saved.getCompany())
                 .closedAt(LocalDateTime.now())
                 .build());
         publishUpsertEvent(saved);

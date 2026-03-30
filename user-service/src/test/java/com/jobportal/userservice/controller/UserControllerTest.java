@@ -18,7 +18,10 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserControllerTest {
@@ -65,6 +68,32 @@ class UserControllerTest {
 
         assertThat(response.getBody().getMessage()).isEqualTo("Token refreshed successfully");
         assertThat(response.getBody().getData()).isEqualTo(authResponse);
+    }
+
+    @Test
+    void requestForgotPasswordOtpReturnsGenericSuccessMessage() {
+        ForgotPasswordRequest request = ForgotPasswordRequest.builder().email("alice@example.com").build();
+
+        ResponseEntity<ApiResponse<Void>> response = userController.requestForgotPasswordOtp(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getMessage()).isEqualTo("If the email is registered, an OTP has been sent");
+        verify(userService).requestPasswordResetOtp(request);
+    }
+
+    @Test
+    void resetPasswordWithOtpReturnsSuccessMessage() {
+        ResetPasswordWithOtpRequest request = ResetPasswordWithOtpRequest.builder()
+                .email("alice@example.com")
+                .otp("123456")
+                .newPassword("NewPass1")
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = userController.resetPasswordWithOtp(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getMessage()).isEqualTo("Password reset successful");
+        verify(userService).resetPasswordWithOtp(request);
     }
 
     @Test

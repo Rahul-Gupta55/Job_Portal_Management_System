@@ -30,7 +30,6 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-//                .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
@@ -41,7 +40,10 @@ public class SecurityConfig {
                                 "/actuator/info",
                                 "/api/users/register",
                                 "/api/users/login",
-                                "/api/users/refresh-token"
+                                "/api/users/refresh-token",
+                                "/api/users/forgot-password/request-otp",
+                                "/api/users/forgot-password/reset",
+                                "/api/internal/users/*/contact"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/users").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/users/*").hasRole("ADMIN")
